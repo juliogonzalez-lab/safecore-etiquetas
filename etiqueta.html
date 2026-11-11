@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SafeCore Etiqueta</title>
+<script type="importmap">
+{
+  "imports": {
+    "brady-web-sdk": "https://cdn.jsdelivr.net/npm/@bradycorporation/brady-web-sdk@3.3.3/dist/bundle.js",
+    "qrcode-generator": "https://cdn.jsdelivr.net/npm/qrcode-generator@2.0.4/dist/qrcode.mjs"
+  }
+}
+</script>
+<style>
+  :root{
+    --rojo:#EA0029; --rojoOsc:#B8001F; --gris:#343434; --grisMed:#6B6B6B;
+    --borde:#D9D9D9; --fondo:#F3F3F3; --blanco:#FFFFFF; --verde:#1E8E3E;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--fondo);color:var(--gris);
+    font-family:Arial,Helvetica,sans-serif;-webkit-tap-highlight-color:transparent}
+  header{background:var(--gris);color:var(--blanco);padding:14px 16px}
+  header .eti{font-size:11px;letter-spacing:.08em;color:#D9D9D9;font-weight:700}
+  header h1{margin:2px 0 0;font-size:20px}
+  main{max-width:560px;margin:0 auto;padding:16px}
+  .card{background:var(--blanco);border:1px solid var(--borde);border-radius:14px;padding:14px;margin-bottom:14px}
+  .tit{font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--rojo);margin:0 0 10px}
+  #vista{width:100%;height:auto;border:1px dashed var(--grisMed);border-radius:6px;background:#fff;image-rendering:pixelated}
+  .fila{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:14px;margin:6px 0}
+  .fila b{font-weight:700}
+  .punto{display:inline-block;width:10px;height:10px;border-radius:50%;background:#B0B0B0;margin-right:6px;vertical-align:middle}
+  .punto.ok{background:var(--verde)}
+  .punto.err{background:var(--rojo)}
+  button{font-family:inherit;border:0;border-radius:12px;font-weight:700;cursor:pointer}
+  #btnImprimir{width:100%;height:64px;font-size:18px;background:var(--rojo);color:#fff}
+  #btnImprimir:active{background:var(--rojoOsc)}
+  #btnImprimir:disabled{background:#B0B0B0}
+  .sec{display:flex;gap:10px;margin-top:10px}
+  .sec button{flex:1;height:44px;font-size:13px;background:var(--blanco);color:var(--gris);border:1px solid var(--borde)}
+  .copias{display:flex;align-items:center;gap:8px}
+  .copias button{width:38px;height:38px;font-size:20px;background:var(--fondo);color:var(--gris);border:1px solid var(--borde)}
+  .copias span{min-width:24px;text-align:center;font-weight:700;font-size:16px}
+  #msg{font-size:14px;line-height:1.4;min-height:20px}
+  #msg.err{color:var(--rojo)} #msg.ok{color:var(--verde)}
+  .ayuda{font-size:12px;color:var(--grisMed);line-height:1.5}
+  label.chk{display:flex;align-items:center;gap:8px;font-size:13px}
+</style>
+</head>
+<body>
+<header>
+  <div class="eti">SAFECORE · CONSERVACIÓN DE HERRAMIENTAS</div>
+  <h1 id="hTitulo">Etiqueta de inspección</h1>
+</header>
+<main>
+  <section class="card">
+    <p class="tit">VISTA PREVIA</p>
+    <canvas id="vista"></canvas>
+  </section>
+
+  <section class="card">
+    <p class="tit">IMPRESORA</p>
+    <div class="fila"><span><span id="punto" class="punto"></span><span id="estado">Sin conectar</span></span><span id="bateria"></span></div>
+    <div class="fila"><span>Copias</span>
+      <span class="copias"><button id="menos" aria-label="Menos">−</button><span id="nCopias">1</span><button id="mas" aria-label="Más">+</button></span>
+    </div>
+    <label class="chk"><input type="checkbox" id="chkRotar"> Rotar 90° (si la etiqueta sale de lado)</label>
+  </section>
+
+  <button id="btnImprimir">IMPRIMIR ETIQUETA</button>
+  <div class="sec">
+    <button id="btnAvance">AVANZAR CINTA</button>
+    <button id="btnDesconectar">DESCONECTAR</button>
+  </div>
+
+  <section class="card" style="margin-top:14px">
+    <div id="msg"></div>
+    <p class="ayuda">Al pulsar <b>Imprimir</b>, elija su M211 en la lista de Bluetooth. Cierre por completo la app Express Labels antes de usar esta página. Cuando termine, puede cerrar esta pestaña y volver a SafeCore.</p>
+  </section>
+</main>
+
+<script type="module">
+import BradySdk from "brady-web-sdk";
+import qrcode from "qrcode-generator";
+
+/* ---------- 1. Datos que llegan desde SafeCore ---------- */
+const q = new URLSearchParams(location.search);
+const limpiar = (v, max) => (v || "").toString().trim().slice(0, max);
+const D = {
+  codigo:    limpiar(q.get("c"), 14) || "MC-01",
+  tipo:      limpiar(q.get("t"), 22) || "MONTACARGAS",
+  ok:        (q.get("ok") ?? "1") !== "0",
+  fecha:     limpiar(q.get("f"), 16) || new Date().toLocaleDateString("es-GT"),
+  turno:     limpiar(q.get("tu"), 6),
+  inspector: limpiar(q.get("i"), 26) || "Inspector",
+  insp:      limpiar(q.get("n"), 8),
+  planta:    limpiar(q.get("p"), 22),
+  qr:        limpiar(q.get("qr"), 60)
+};
+D.qr = D.qr || D.codigo;
+document.getElementById("hTitulo").textContent = D.codigo + " · " + D.tipo;
+
+/* ---------- 2. Dibujo de la etiqueta (blanco y negro) ---------- */
+const W = 720, H = 200;               // proporción ~ 19 x 68 mm
+const lienzo = document.createElement("canvas");
+lienzo.width = W; lienzo.height = H;
+
+function ajustarTexto(ctx, texto, peso, tamMax, anchoMax){
+  let t = tamMax;
+  do { ctx.font = `${peso} ${t}px Arial, Helvetica, sans-serif`; t--; }
+  while (ctx.measureText(texto).width > anchoMax && t > 10);
+}
+
+function dibujar(){
+  const ctx = lienzo.getContext("2d");
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = "#000"; ctx.textBaseline = "alphabetic";
+
+  // QR a la izquierda, con módulos enteros para que salga nítido
+  const qr = qrcode(0, "M"); qr.addData(D.qr); qr.make();
+  const n = qr.getModuleCount();
+  const mod = Math.floor((H - 16) / n);
+  const lado = mod * n, x0 = 8, y0 = Math.floor((H - lado) / 2);
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++)
+    if (qr.isDark(r, c)) ctx.fillRect(x0 + c * mod, y0 + r * mod, mod, mod);
+
+  const xT = x0 + lado + 18, anchoT = W - xT - 10;
+
+  // Línea 1: código grande + tipo
+  ajustarTexto(ctx, D.codigo, "bold", 58, anchoT * 0.55);
+  ctx.fillText(D.codigo, xT, 54);
+  const anchoCod = ctx.measureText(D.codigo).width;
+  ajustarTexto(ctx, D.tipo.toUpperCase(), "bold", 22, anchoT - anchoCod - 14);
+  ctx.fillText(D.tipo.toUpperCase(), xT + anchoCod + 14, 52);
+
+  // Línea 2: franja invertida con el estado
+  const estado = D.ok ? "INSPECCIONADO · APTO" : "FUERA DE SERVICIO";
+  ctx.fillRect(xT, 66, anchoT, 52);
+  ctx.fillStyle = "#fff";
+  ajustarTexto(ctx, estado, "bold", 34, anchoT - 24);
+  ctx.fillText(estado, xT + 12, 104);
+  ctx.fillStyle = "#000";
+
+  // Línea 3: fecha · turno · número de inspección
+  const l3 = [D.fecha, D.turno ? "Turno " + D.turno : "", D.insp ? "Insp. #" + D.insp : ""].filter(Boolean).join("  ·  ");
+  ajustarTexto(ctx, l3, "bold", 26, anchoT);
+  ctx.fillText(l3, xT, 150);
+
+  // Línea 4: inspector · planta
+  const l4 = [D.inspector, D.planta].filter(Boolean).join("  ·  ");
+  ajustarTexto(ctx, l4, "bold", 24, anchoT);
+  ctx.fillText(l4, xT, 184);
+
+  // Umbral a 1 bit: sin grises, impresión nítida
+  const img = ctx.getImageData(0, 0, W, H), p = img.data;
+  for (let i = 0; i < p.length; i += 4){
+    const v = (p[i] + p[i+1] + p[i+2]) / 3 < 150 ? 0 : 255;
+    p[i] = p[i+1] = p[i+2] = v; p[i+3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+
+  const vista = document.getElementById("vista");
+  vista.width = W; vista.height = H;
+  vista.getContext("2d").drawImage(lienzo, 0, 0);
+}
+dibujar();
+
+function imagenParaImprimir(){
+  let fuente = lienzo;
+  if (chkRotar.checked){
+    const r = document.createElement("canvas");
+    r.width = H; r.height = W;
+    const c = r.getContext("2d");
+    c.translate(H, 0); c.rotate(Math.PI / 2); c.drawImage(lienzo, 0, 0);
+    fuente = r;
+  }
+  return new Promise((ok, mal) => {
+    const im = new Image();
+    im.onload = () => ok(im); im.onerror = mal;
+    im.src = fuente.toDataURL("image/png");
+  });
+}
+
+/* ---------- 3. Preferencias locales ---------- */
+const chkRotar = document.getElementById("chkRotar");
+try { chkRotar.checked = localStorage.getItem("sc_rotar") === "1"; } catch(e){}
+chkRotar.addEventListener("change", () => { try { localStorage.setItem("sc_rotar", chkRotar.checked ? "1" : "0"); } catch(e){} });
+
+let copias = 1;
+const nCopias = document.getElementById("nCopias");
+document.getElementById("menos").onclick = () => { copias = Math.max(1, copias - 1); nCopias.textContent = copias; };
+document.getElementById("mas").onclick   = () => { copias = Math.min(10, copias + 1); nCopias.textContent = copias; };
+
+/* ---------- 4. Impresora Brady M211 ---------- */
+const msg = document.getElementById("msg");
+const aviso = (t, tipo) => { msg.textContent = t; msg.className = tipo || ""; };
+const punto = document.getElementById("punto"), estadoTx = document.getElementById("estado"), bateria = document.getElementById("bateria");
+const btn = document.getElementById("btnImprimir");
+
+const sdk = new BradySdk(actualizarEstado, false);
+
+function actualizarEstado(){
+  const con = sdk.isConnected();
+  punto.className = "punto " + (con ? "ok" : "");
+  estadoTx.textContent = con ? (sdk.printerName || "M211 conectada") : "Sin conectar";
+  bateria.textContent = con && sdk.batteryLevelPercentage != null ? "🔋 " + sdk.batteryLevelPercentage + "%" : "";
+}
+
+const esperar = ms => new Promise(r => setTimeout(r, ms));
+async function esperarCinta(){
+  for (let i = 0; i < 30; i++){
+    if (sdk.supplyName && sdk.supplyWidth != null) return true;
+    await esperar(250);
+  }
+  return false;
+}
+
+async function conectar(){
+  if (sdk.isConnected()) return true;
+  aviso("Elija su impresora M211 en la lista de Bluetooth…");
+  const ok = await sdk.showDiscoveredBleDevices();
+  actualizarEstado();
+  if (!ok){
+    const det = sdk.getConnectionErrorMessage ? sdk.getConnectionErrorMessage() : "";
+    aviso("No se pudo conectar. " + (det || "Verifique que la M211 esté encendida y que Express Labels esté cerrada."), "err");
+    punto.className = "punto err";
+    return false;
+  }
+  if (!(await esperarCinta())){
+    aviso("La impresora no reporta la cinta. Revise que el cartucho esté bien colocado.", "err");
+    return false;
+  }
+  return true;
+}
+
+btn.addEventListener("click", async () => {
+  btn.disabled = true;
+  try{
+    if (!(await sdk.isSupportedBrowser())){
+      aviso("Este navegador no permite Bluetooth. Abra la página en Google Chrome.", "err");
+      return;
+    }
+    if (!(await conectar())) return;
+    aviso("Imprimiendo…");
+    sdk.setCopies(copias);
+    sdk.setCutOption(0);
+    const im = await imagenParaImprimir();
+    const ok = await sdk.printBitmap(im);
+    if (ok){
+      aviso("✔ Etiqueta enviada. Péguela en el equipo " + D.codigo + ".", "ok");
+      btn.textContent = "IMPRIMIR OTRA VEZ";
+    } else {
+      aviso("La impresora rechazó el trabajo. Revise la cinta y la batería e intente de nuevo.", "err");
+    }
+  } catch (e){
+    aviso("Error: " + (e && e.message ? e.message : e), "err");
+  } finally {
+    btn.disabled = false;
+    actualizarEstado();
+  }
+});
+
+document.getElementById("btnAvance").onclick = async () => {
+  if (!(await conectar())) return;
+  await sdk.feed(); aviso("Cinta avanzada.", "ok");
+};
+document.getElementById("btnDesconectar").onclick = async () => {
+  await sdk.disconnect(); actualizarEstado(); aviso("Impresora desconectada.");
+};
+
+sdk.isSupportedBrowser().then(s => { if (!s) aviso("Este navegador no permite Bluetooth. Abra la página en Google Chrome.", "err"); });
+</script>
+</body>
+</html>
